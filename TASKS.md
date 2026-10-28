@@ -43,7 +43,7 @@ Keputusan implementasi kecil lain (asumsi, silakan tinjau):
 - [x] Ganti namespace menjadi `JejakBencana.Api`
 - [x] Tambah paket: Npgsql EF Core, Identity EF Core, EF Core Design, Scalar
 - [x] Konfigurasi `AppDbContext` + connection string dari environment variable (fail-fast bila kosong)
-- [x] OpenAPI (`/openapi/v1.json`, semua environment) + Scalar UI (Development)
+- [x] OpenAPI (`/openapi/v1.json`, semua environment) + Scalar UI (semua environment)
 - [x] Health check `GET /health`
 - [x] `appsettings.json` tanpa secret + `.env.example`
 - [x] `README.md` (setup, migrasi, seeder, endpoint, keputusan)

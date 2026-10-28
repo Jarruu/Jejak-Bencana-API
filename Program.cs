@@ -138,12 +138,11 @@ var app = builder.Build();
 // Dokumen kontrak selalu tersedia agar repo web bisa mengacu ke bentuk request/response.
 app.MapOpenApi();
 
-if (app.Environment.IsDevelopment())
-{
-    app.MapScalarApiReference(options => options
-        .WithTitle("Jejak Bencana API")
-        .WithOpenApiRoutePattern("/openapi/{documentName}.json"));
-}
+// UI Scalar hanya membaca dokumen OpenAPI yang sudah publik di semua environment;
+// ia tidak menambah akses apa pun. Jadi dibiarkan tersedia juga di production.
+app.MapScalarApiReference(options => options
+    .WithTitle("Jejak Bencana API")
+    .WithOpenApiRoutePattern("/openapi/{documentName}.json"));
 
 app.UseExceptionHandler();
 app.UseStatusCodePages();

@@ -8,7 +8,7 @@ Acuan: `PRD.md` v2.1 dan `SPECS.md`. Aturan wajib ada di `SPECS.md`.
 - Framework: ASP.NET Core Minimal API (.NET 10)
 - Database: PostgreSQL + EF Core (Npgsql)
 - Auth: ASP.NET Core Identity, cookie sesi
-- Dokumentasi kontrak: OpenAPI + Scalar UI di `/scalar` (Development)
+- Dokumentasi kontrak: OpenAPI + Scalar UI di `/scalar` (semua environment)
 
 ---
 
@@ -59,7 +59,7 @@ dotnet run
 
 - Health check: `GET http://localhost:5260/health` (mengembalikan 503 bila database tidak terjangkau)
 - Dokumen OpenAPI: `GET /openapi/v1.json` (semua environment, termasuk production)
-- Scalar UI (coba endpoint dari browser): `http://localhost:5260/scalar/v1` (Development)
+- Scalar UI (coba endpoint dari browser): `http://localhost:5260/scalar/v1` (semua environment)
 
 Saat pertama jalan di Development, seeder membuat akun admin dari `ADMIN_EMAIL`/`ADMIN_PASSWORD` dan satu **data contoh draft** berlabel `DATA CONTOH - JANGAN DITERBITKAN` (nominal 0). Data itu tidak akan tampil di endpoint publik. Di luar Development hanya akun admin pertama yang dibuat, tanpa data contoh.
 
@@ -70,7 +70,7 @@ Ada dua bentuk, keduanya dibuat dari kode yang sama:
 | Bentuk | URL | Untuk siapa |
 |---|---|---|
 | OpenAPI 3.1 JSON | `/openapi/v1.json` | Repo `jejak-bencana-web`, generator klien, alat lain. Tersedia di semua environment. |
-| Scalar UI | `/scalar/v1` | Manusia: daftar endpoint, skema request/response, tombol coba. Development saja. |
+| Scalar UI | `/scalar/v1` | Manusia: daftar endpoint, skema request/response, tombol coba. Tersedia di semua environment. |
 
 Isi dokumen: 15 endpoint (3 publik + 12 admin), ringkasan dan deskripsi per operasi, skema DTO, serta skema keamanan `cookieAuth` untuk endpoint admin. Judul dokumen: **Jejak Bencana API**.
 

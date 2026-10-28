@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.AspNetCore.Hosting;
 
 namespace JejakBencana.Api.Tests;
 
@@ -32,5 +33,17 @@ public class OpenApiContractTests
         }
 
         Assert.True(root.GetProperty("components").GetProperty("securitySchemes").TryGetProperty("cookieAuth", out _));
+    }
+
+    [Fact]
+    public async Task Scalar_Ui_Is_Served_In_Production()
+    {
+        await using var factory = new ApiFactory()
+            .WithWebHostBuilder(b => b.UseEnvironment("Production"));
+        var client = factory.CreateClient();
+
+        var response = await client.GetAsync("/scalar/v1");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 }
