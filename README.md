@@ -1,9 +1,9 @@
-# Jejak Bencana — API
+# Jejak Bencana - API
 
 Backend untuk **Jejak Bencana**, website informasi Dana Siap Pakai (DSP) untuk penanggulangan bencana.
 API ini menyediakan data untuk halaman publik (hanya konten terbit) dan panel admin (CRUD manual + publikasi tervalidasi).
 
-Acuan: `PRD.md` v2.1 dan `SPECS.md`. Aturan wajib ada di `SPECS.md` §4 dan §6 — baca itu sebelum mengubah kode.
+Acuan: `PRD.md` v2.1 dan `SPECS.md`. Aturan wajib ada di `SPECS.md`.
 
 - Framework: ASP.NET Core Minimal API (.NET 10)
 - Database: PostgreSQL + EF Core (Npgsql)
@@ -21,7 +21,7 @@ Acuan: `PRD.md` v2.1 dan `SPECS.md`. Aturan wajib ada di `SPECS.md` §4 dan §6 
 
 ### 2. Konfigurasi
 
-Secret **tidak** disimpan di repository. ASP.NET Core **tidak** membaca file `.env` otomatis — nilainya harus ada sebagai environment variable proses.
+Secret **tidak** disimpan di repository. ASP.NET Core **tidak** membaca file `.env` otomatis - nilainya harus ada sebagai environment variable proses.
 
 Pilihan paling sederhana, buat `.env` di root proyek (sudah di `.gitignore`) lalu muat ke shell:
 
@@ -40,7 +40,7 @@ $env:ADMIN_EMAIL = "admin@example.com"
 $env:ADMIN_PASSWORD = "kata-sandi-panjang-minimal-12"
 ```
 
-Daftar kunci ada di `.env.example`. Variabel `ADMIN_*` hanya dipakai seeder di lingkungan Development.
+Daftar kunci ada di `.env.example`. `ADMIN_*` dipakai sekali saat startup untuk membuat akun admin pertama, bila tabel user masih kosong (semua environment). Setelah ada admin, nilainya diabaikan.
 
 ### 3. Migrasi database
 
@@ -49,7 +49,7 @@ dotnet tool restore
 dotnet ef database update
 ```
 
-`dotnet ef` memakai `Data/AppDbContextFactory.cs`, yang membaca `ConnectionStrings__Default` dan punya fallback lokal untuk pembuatan migrasi.
+`dotnet ef` memakai `Data/AppDbContextFactory.cs`, yang membaca `ConnectionStrings__Default` dan **gagal keras** bila variabel itu kosong — supaya migrasi tidak diam-diam masuk ke database lokal.
 
 ### 4. Jalankan
 
@@ -57,11 +57,11 @@ dotnet ef database update
 dotnet run
 ```
 
-- Health check: `GET http://localhost:5260/health`
+- Health check: `GET http://localhost:5260/health` (mengembalikan 503 bila database tidak terjangkau)
 - Dokumen OpenAPI: `GET /openapi/v1.json` (semua environment, termasuk production)
 - Scalar UI (coba endpoint dari browser): `http://localhost:5260/scalar/v1` (Development)
 
-Saat pertama jalan di Development, seeder membuat akun admin dari `ADMIN_EMAIL`/`ADMIN_PASSWORD` dan satu **data contoh draft** berlabel `DATA CONTOH — JANGAN DITERBITKAN` (nominal 0). Data itu tidak akan tampil di endpoint publik.
+Saat pertama jalan di Development, seeder membuat akun admin dari `ADMIN_EMAIL`/`ADMIN_PASSWORD` dan satu **data contoh draft** berlabel `DATA CONTOH - JANGAN DITERBITKAN` (nominal 0). Data itu tidak akan tampil di endpoint publik. Di luar Development hanya akun admin pertama yang dibuat, tanpa data contoh.
 
 ### 5. Dokumentasi API
 
@@ -155,7 +155,7 @@ Pertanyaan terbuka di `SPECS.md` §15 sudah diputuskan. Ringkasannya (detail di 
 |---|---|
 | Tipe ID | `Guid` (UUID v7) |
 | Payload `sources` | `[{ sourceId, supportingNote }]`, mengganti seluruh relasi saat PATCH |
-| Endpoint glosarium & ubah/hapus sumber | Ditambahkan — tanpa itu form admin di PRD §5.5 tidak bisa dipakai |
+| Endpoint glosarium & ubah/hapus sumber | Ditambahkan - tanpa itu form admin di PRD §5.5 tidak bisa dipakai |
 | Kasus `published` diubah | Kembali ke `draft` |
 | Pembatasan login | Identity lockout: 5 gagal → 5 menit, per akun, respons `429` |
 | .NET | 10 (LTS) |
@@ -188,7 +188,9 @@ Jalankan migrasi saat deploy:
 dotnet ef migrations script --idempotent -o migrate.sql
 ```
 
-atau `dotnet ef database update` dari pipeline dengan connection string production. Seeder **tidak** berjalan di luar Development; akun admin production dibuat manual lewat `UserManager` atau tooling internal.
+atau `dotnet ef database update` dari pipeline dengan connection string production. Migrasi otomatis saat startup hanya dilakukan di Development; di luar itu app hanya mencatat error bila ada migrasi tertunda, supaya beberapa instance tidak balapan memigrasi database yang sama.
+
+Akun admin production dibuat dari `ADMIN_EMAIL`/`ADMIN_PASSWORD` saat startup pertama, bila belum ada user sama sekali. Hapus kedua variabel itu setelah login pertama berhasil. Data contoh tidak pernah dibuat di luar Development.
 
 ---
 
@@ -200,7 +202,7 @@ Perintah yang dijalankan pada implementasi ini:
 |---|---|
 | `dotnet build JejakBencana.slnx` | Berhasil, 0 warning |
 | `dotnet ef migrations script` | SQL PostgreSQL terbentuk |
-| `dotnet test tests/JejakBencana.Api.Tests` | 59 test lulus |
+| `dotnet test tests/JejakBencana.Api.Tests` | 64 test lulus |
 | `dotnet ef database update` | Migrasi `InitialCreate` diterapkan ke PostgreSQL nyata |
 | `bash scripts/e2e.sh` | 11 langkah alur admin lulus terhadap PostgreSQL nyata |
 
@@ -212,7 +214,7 @@ Jalankan dengan aplikasi sudah hidup dan `.env` berisi kredensial:
 bash scripts/e2e.sh
 ```
 
-Seeder **tidak** berjalan di luar Development; akun admin production dibuat manual lewat `UserManager` atau tooling internal.
+Default `BASE` adalah `http://localhost:5260`; timpa dengan `BASE=http://host:port bash scripts/e2e.sh` bila perlu. Skrip ini menulis data uji ke database yang sedang dipakai — jangan arahkan ke production.
 
 ---
 
@@ -224,7 +226,7 @@ Data/         AppDbContext, migrasi, design-time factory
 Contracts/    DTO request/response (camelCase ke frontend)
 Endpoints/    PublicEndpoints, AdminEndpoints, AdminMapping
 Validation/   aturan URL/slug dan validator publikasi
-scripts/      e2e.sh — uji alur admin ke database nyata
+scripts/      e2e.sh - uji alur admin ke database nyata
 Program.cs    konfigurasi host, Identity, cookie, seeder
 tests/        xUnit: unit validator + integration test endpoint
 ```

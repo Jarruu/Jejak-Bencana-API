@@ -4,6 +4,7 @@ using JejakBencana.Api.Domain;
 using JejakBencana.Api.Validation;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace JejakBencana.Api.Endpoints;
 
@@ -18,6 +19,7 @@ public static class AdminEndpoints
             .RequireAuthorization();
 
         group.MapPost("/login", Login).AllowAnonymous().WithName("AdminLogin")
+            .RequireRateLimiting("login")
             .WithSummary("Mulai sesi admin.")
             .WithDescription("Mengembalikan 401 dengan pesan umum bila kredensial salah, dan 429 bila akun terkunci karena percobaan berulang.");
 
@@ -113,13 +115,26 @@ public static class AdminEndpoints
 
     private static async Task<IResult> GetCases(AppDbContext db, CancellationToken ct)
     {
-        var cases = await db.Cases
+        // Proyeksi: cukup hitung jumlah catatan dana, tidak perlu memuat barisnya.
+        var rows = await db.Cases
             .AsNoTracking()
-            .Include(c => c.FundingRecords)
             .OrderByDescending(c => c.UpdatedAt)
+            .Select(c => new
+            {
+                c.Id,
+                c.Title,
+                c.Slug,
+                c.Summary,
+                c.Region,
+                c.Status,
+                c.CreatedAt,
+                c.UpdatedAt,
+                FundingRecordCount = c.FundingRecords.Count,
+            })
             .ToListAsync(ct);
 
-        return Results.Ok(cases.Select(c => c.ToListDto()).ToList());
+        return Results.Ok(rows.Select(r => new AdminCaseListItemDto(
+            r.Id, r.Title, r.Slug, r.Summary, r.Region, r.Status.ToCode(), r.CreatedAt, r.UpdatedAt, r.FundingRecordCount)).ToList());
     }
 
     private static async Task<IResult> GetCase(Guid id, AppDbContext db, CancellationToken ct)
@@ -135,7 +150,7 @@ public static class AdminEndpoints
 
     private static async Task<IResult> CreateCase(CreateCaseRequest request, AppDbContext db, CancellationToken ct)
     {
-        var errors = ValidateCaseFields(request.Title, request.Slug, request.Summary, out var slug);
+        var errors = ValidateCaseFields(request.Title, request.Slug, request.Summary, request.Region, out var slug);
         if (errors.Count > 0) return Validation(errors);
 
         if (await db.Cases.AnyAsync(c => c.Slug == slug, ct))
@@ -154,7 +169,14 @@ public static class AdminEndpoints
         };
 
         db.Cases.Add(entity);
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (IsUniqueViolation(ex))
+        {
+            return Fail(400, "duplicate_slug", "slug", "Slug sudah dipakai kasus lain.");
+        }
 
         return Results.Created($"/api/admin/cases/{entity.Id}", entity.ToDetailDto());
     }
@@ -168,7 +190,7 @@ public static class AdminEndpoints
 
         if (entity is null) return NotFoundCase();
 
-        var errors = ValidateCaseFields(request.Title, request.Slug, request.Summary, out var slug);
+        var errors = ValidateCaseFields(request.Title, request.Slug, request.Summary, request.Region, out var slug);
         if (errors.Count > 0) return Validation(errors);
 
         if (await db.Cases.AnyAsync(c => c.Slug == slug && c.Id != id, ct))
@@ -181,7 +203,15 @@ public static class AdminEndpoints
         entity.Status = CaseStatus.Draft; // edit pada kasus terbit menurunkan status
         entity.UpdatedAt = DateTimeOffset.UtcNow;
 
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (IsUniqueViolation(ex))
+        {
+            return Fail(400, "duplicate_slug", "slug", "Slug sudah dipakai kasus lain.");
+        }
+
         return Results.Ok(entity.ToDetailDto());
     }
 
@@ -224,7 +254,10 @@ public static class AdminEndpoints
         if (!await db.Cases.AnyAsync(c => c.Id == request.CaseId, ct))
             return Fail(400, "unknown_case", "caseId", "Kasus tidak ditemukan.");
 
-        var errors = ValidateFundingFields(request.InformationType, request.Amount, request.Currency, out var type, out var currency);
+        var errors = ValidateFundingFields(
+            request.InformationType, request.Amount, request.Currency,
+            request.Purpose, request.PeriodLabel, request.ContextNote,
+            out var type, out var currency);
         if (errors.Count > 0) return Validation(errors);
 
         var sources = await ResolveSourcesAsync(db, request.Sources, ct);
@@ -234,7 +267,7 @@ public static class AdminEndpoints
         {
             CaseId = request.CaseId,
             InformationType = type,
-            Amount = request.Amount,
+            Amount = request.Amount!.Value,
             Currency = currency,
             Purpose = Normalize(request.Purpose) ?? "",
             PeriodLabel = Normalize(request.PeriodLabel),
@@ -257,7 +290,10 @@ public static class AdminEndpoints
 
         if (entity is null) return NotFoundFundingRecord();
 
-        var errors = ValidateFundingFields(request.InformationType, request.Amount, request.Currency, out var type, out var currency);
+        var errors = ValidateFundingFields(
+            request.InformationType, request.Amount, request.Currency,
+            request.Purpose, request.PeriodLabel, request.ContextNote,
+            out var type, out var currency);
         if (errors.Count > 0) return Validation(errors);
 
         var sources = await ResolveSourcesAsync(db, request.Sources, ct);
@@ -320,7 +356,7 @@ public static class AdminEndpoints
 
     private static async Task<IResult> CreateSource(CreateSourceRequest request, AppDbContext db, CancellationToken ct)
     {
-        var errors = ValidateSourceFields(request.Title, request.Url, request.Publisher);
+        var errors = ValidateSourceFields(request.Title, request.Url, request.Publisher, request.Note);
         if (errors.Count > 0) return Validation(errors);
 
         var entity = new Source
@@ -344,7 +380,7 @@ public static class AdminEndpoints
         var entity = await db.Sources.FirstOrDefaultAsync(s => s.Id == id, ct);
         if (entity is null) return NotFoundSource();
 
-        var errors = ValidateSourceFields(request.Title, request.Url, request.Publisher);
+        var errors = ValidateSourceFields(request.Title, request.Url, request.Publisher, request.Note);
         if (errors.Count > 0) return Validation(errors);
 
         entity.Title = request.Title!.Trim();
@@ -405,7 +441,14 @@ public static class AdminEndpoints
         };
 
         db.GlossaryTerms.Add(entity);
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (IsUniqueViolation(ex))
+        {
+            return Fail(400, "duplicate_term", "term", "Istilah sudah ada di glosarium.");
+        }
 
         return Results.Created($"/api/admin/glossary/{entity.Id}", entity.ToDto());
     }
@@ -429,7 +472,15 @@ public static class AdminEndpoints
         entity.Definition = request.Definition!.Trim();
         entity.SourceId = request.SourceId;
 
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (IsUniqueViolation(ex))
+        {
+            return Fail(400, "duplicate_term", "term", "Istilah sudah ada di glosarium.");
+        }
+
         return Results.Ok(entity.ToDto());
     }
 
@@ -446,19 +497,23 @@ public static class AdminEndpoints
 
     // ---------------- Validasi dan respons ----------------
 
-    private static List<ApiError> ValidateCaseFields(string? title, string? slug, string? summary, out string normalizedSlug)
+    private static List<ApiError> ValidateCaseFields(string? title, string? slug, string? summary, string? region, out string normalizedSlug)
     {
         var errors = new List<ApiError>();
         normalizedSlug = (slug ?? "").Trim().ToLowerInvariant();
 
         if (string.IsNullOrWhiteSpace(title))
             errors.Add(new("missing_title", "title", "Judul kasus wajib diisi."));
+        AddTooLong(errors, title, FieldLimits.CaseTitle, "title");
 
         if (!SlugRules.IsValid(normalizedSlug))
             errors.Add(new("invalid_slug", "slug", "Slug wajib diisi dan hanya boleh berisi huruf kecil, angka, dan tanda hubung."));
 
         if (string.IsNullOrWhiteSpace(summary))
             errors.Add(new("missing_summary", "summary", "Ringkasan kasus wajib diisi."));
+        AddTooLong(errors, summary, FieldLimits.CaseSummary, "summary");
+
+        AddTooLong(errors, region, FieldLimits.CaseRegion, "region");
 
         return errors;
     }
@@ -467,6 +522,9 @@ public static class AdminEndpoints
         string? informationType,
         long? amount,
         string? currency,
+        string? purpose,
+        string? periodLabel,
+        string? contextNote,
         out InformationType type,
         out string normalizedCurrency)
     {
@@ -485,21 +543,30 @@ public static class AdminEndpoints
         if (!AllowedCurrencies.Contains(normalizedCurrency))
             errors.Add(new("invalid_currency", "currency", $"Mata uang harus salah satu dari: {string.Join(", ", AllowedCurrencies)}."));
 
+        AddTooLong(errors, purpose, FieldLimits.FundingPurpose, "purpose");
+        AddTooLong(errors, periodLabel, FieldLimits.FundingPeriodLabel, "periodLabel");
+        AddTooLong(errors, contextNote, FieldLimits.FundingContextNote, "contextNote");
+
         return errors;
     }
 
-    private static List<ApiError> ValidateSourceFields(string? title, string? url, string? publisher)
+    private static List<ApiError> ValidateSourceFields(string? title, string? url, string? publisher, string? note)
     {
         var errors = new List<ApiError>();
 
         if (string.IsNullOrWhiteSpace(title))
             errors.Add(new("missing_title", "title", "Judul sumber wajib diisi."));
+        AddTooLong(errors, title, FieldLimits.SourceTitle, "title");
 
         if (!UrlRules.IsValid(url))
             errors.Add(new("invalid_url", "url", "URL wajib berupa alamat http atau https yang valid."));
+        AddTooLong(errors, url, FieldLimits.SourceUrl, "url");
 
         if (string.IsNullOrWhiteSpace(publisher))
             errors.Add(new("missing_publisher", "publisher", "Penerbit wajib diisi."));
+        AddTooLong(errors, publisher, FieldLimits.SourcePublisher, "publisher");
+
+        AddTooLong(errors, note, FieldLimits.SourceNote, "note");
 
         return errors;
     }
@@ -510,11 +577,20 @@ public static class AdminEndpoints
 
         if (string.IsNullOrWhiteSpace(term))
             errors.Add(new("missing_term", "term", "Istilah wajib diisi."));
+        AddTooLong(errors, term, FieldLimits.GlossaryTerm, "term");
 
         if (string.IsNullOrWhiteSpace(definition))
             errors.Add(new("missing_definition", "definition", "Definisi wajib diisi."));
+        AddTooLong(errors, definition, FieldLimits.GlossaryDefinition, "definition");
 
         return errors;
+    }
+
+    // Menjaga agar input terlalu panjang ditolak 422, bukan gagal di kolom varchar (500).
+    private static void AddTooLong(List<ApiError> errors, string? value, int max, string field)
+    {
+        if (value?.Trim().Length > max)
+            errors.Add(new("too_long", field, $"Panjang maksimal {max} karakter."));
     }
 
     private sealed record ResolvedSources(List<RecordSource> Value, List<ApiError> Errors);
@@ -534,6 +610,14 @@ public static class AdminEndpoints
         for (var i = 0; i < inputs.Count; i++)
         {
             var input = inputs[i];
+
+            if (input.SupportingNote?.Trim().Length > FieldLimits.RecordSourceSupportingNote)
+            {
+                errors.Add(new("too_long", $"sources[{i}].supportingNote",
+                    $"Panjang maksimal {FieldLimits.RecordSourceSupportingNote} karakter."));
+                continue;
+            }
+
             if (!existing.Contains(input.SourceId))
             {
                 errors.Add(new("unknown_source", $"sources[{i}].sourceId", "Sumber tidak ditemukan."));
@@ -558,6 +642,11 @@ public static class AdminEndpoints
 
     private static string? Normalize(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    // Cek AnyAsync sebelum insert bisa kalah balapan (dua request bersamaan sama-sama lolos).
+    // Unique index di database yang jadi penjaga terakhir; petakan pelanggarannya ke 400.
+    private static bool IsUniqueViolation(DbUpdateException ex) =>
+        ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation };
 
     private static IResult Validation(List<ApiError> errors) =>
         Results.Json(new ApiErrorResponse(errors), statusCode: StatusCodes.Status422UnprocessableEntity);

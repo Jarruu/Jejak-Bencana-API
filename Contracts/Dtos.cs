@@ -5,7 +5,6 @@ public sealed record ApiError(string Code, string? Field, string Message);
 
 public sealed record ApiErrorResponse(IReadOnlyList<ApiError> Errors)
 {
-    public static ApiErrorResponse From(IEnumerable<ApiError> errors) => new([.. errors]);
     public static ApiErrorResponse Single(string code, string? field, string message) => new([new ApiError(code, field, message)]);
 }
 
@@ -125,7 +124,7 @@ public sealed record RecordSourceInput(Guid SourceId, string? SupportingNote);
 public sealed record CreateFundingRecordRequest(
     Guid CaseId,
     string? InformationType,
-    long Amount,
+    long? Amount,
     string? Currency,
     string? Purpose,
     string? PeriodLabel,

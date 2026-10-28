@@ -21,9 +21,6 @@ public static class AdminMapping
         r.ContextNote,
         r.Sources.Select(rs => new AdminRecordSourceDto(rs.SourceId, rs.SupportingNote)).ToList());
 
-    public static AdminCaseListItemDto ToListDto(this DisasterCase c) => new(
-        c.Id, c.Title, c.Slug, c.Summary, c.Region, c.Status.ToCode(), c.CreatedAt, c.UpdatedAt, c.FundingRecords.Count);
-
     public static AdminCaseDetailDto ToDetailDto(this DisasterCase c) => new(
         c.Id, c.Title, c.Slug, c.Summary, c.Region, c.Status.ToCode(), c.CreatedAt, c.UpdatedAt,
         c.FundingRecords.Select(r => r.ToDto()).ToList());

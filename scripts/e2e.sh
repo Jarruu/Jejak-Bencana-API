@@ -2,7 +2,7 @@
 # Jalankan dari folder proyek: bash scripts/e2e.sh
 set -euo pipefail
 
-BASE="${BASE:-http://localhost:5286}"
+BASE="${BASE:-http://localhost:5260}"
 COOKIE="$(mktemp)"
 trap 'rm -f "$COOKIE"' EXIT
 

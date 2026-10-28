@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -17,7 +18,15 @@ namespace JejakBencana.Api.Tests;
 /// </summary>
 public sealed class ApiFactory : WebApplicationFactory<Program>
 {
-    private readonly string _databaseName = $"jejak-bencana-tests-{Guid.NewGuid()}";
+    private readonly string _databaseName;
+    private readonly InMemoryDatabaseRoot? _root;
+
+    // Nama + root bisa dibagi antar factory untuk mensimulasikan restart container.
+    public ApiFactory(string? databaseName = null, InMemoryDatabaseRoot? root = null)
+    {
+        _databaseName = databaseName ?? $"jejak-bencana-tests-{Guid.NewGuid()}";
+        _root = root;
+    }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -42,7 +51,11 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
             foreach (var descriptor in toRemove)
                 services.Remove(descriptor);
 
-            services.AddDbContext<AppDbContext>(options => options.UseInMemoryDatabase(_databaseName));
+            services.AddDbContext<AppDbContext>(options =>
+            {
+                if (_root is null) options.UseInMemoryDatabase(_databaseName);
+                else options.UseInMemoryDatabase(_databaseName, _root);
+            });
         });
     }
 

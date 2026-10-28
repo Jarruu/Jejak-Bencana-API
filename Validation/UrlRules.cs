@@ -11,7 +11,7 @@ public static class UrlRules
 
 public static class SlugRules
 {
-    public const int MaxLength = 200;
+    public const int MaxLength = FieldLimits.CaseSlug;
 
     /// <summary>Huruf kecil, angka, dan tanda hubung tunggal. Menjaga slug tetap aman di URL.</summary>
     public static bool IsValid(string? slug) =>

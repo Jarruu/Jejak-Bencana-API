@@ -1,4 +1,5 @@
 using JejakBencana.Api.Domain;
+using JejakBencana.Api.Validation;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
@@ -21,10 +22,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
         {
             e.ToTable("cases");
             e.HasKey(x => x.Id);
-            e.Property(x => x.Title).HasMaxLength(300).IsRequired();
-            e.Property(x => x.Slug).HasMaxLength(200).IsRequired();
-            e.Property(x => x.Summary).HasMaxLength(2000).IsRequired();
-            e.Property(x => x.Region).HasMaxLength(200);
+            e.Property(x => x.Title).HasMaxLength(FieldLimits.CaseTitle).IsRequired();
+            e.Property(x => x.Slug).HasMaxLength(FieldLimits.CaseSlug).IsRequired();
+            e.Property(x => x.Summary).HasMaxLength(FieldLimits.CaseSummary).IsRequired();
+            e.Property(x => x.Region).HasMaxLength(FieldLimits.CaseRegion);
             e.Property(x => x.Status)
                 .HasConversion(s => s.ToCode(), c => CaseStatusCodes.FromCode(c))
                 .HasMaxLength(20)
@@ -46,9 +47,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
                 .HasMaxLength(40)
                 .IsRequired();
             e.Property(x => x.Currency).HasMaxLength(3).IsRequired();
-            e.Property(x => x.Purpose).HasMaxLength(2000).IsRequired();
-            e.Property(x => x.PeriodLabel).HasMaxLength(200);
-            e.Property(x => x.ContextNote).HasMaxLength(4000);
+            e.Property(x => x.Purpose).HasMaxLength(FieldLimits.FundingPurpose).IsRequired();
+            e.Property(x => x.PeriodLabel).HasMaxLength(FieldLimits.FundingPeriodLabel);
+            e.Property(x => x.ContextNote).HasMaxLength(FieldLimits.FundingContextNote);
             e.HasIndex(x => x.CaseId);
         });
 
@@ -56,17 +57,17 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
         {
             e.ToTable("sources");
             e.HasKey(x => x.Id);
-            e.Property(x => x.Title).HasMaxLength(500).IsRequired();
-            e.Property(x => x.Url).HasMaxLength(2000).IsRequired();
-            e.Property(x => x.Publisher).HasMaxLength(300).IsRequired();
-            e.Property(x => x.Note).HasMaxLength(2000);
+            e.Property(x => x.Title).HasMaxLength(FieldLimits.SourceTitle).IsRequired();
+            e.Property(x => x.Url).HasMaxLength(FieldLimits.SourceUrl).IsRequired();
+            e.Property(x => x.Publisher).HasMaxLength(FieldLimits.SourcePublisher).IsRequired();
+            e.Property(x => x.Note).HasMaxLength(FieldLimits.SourceNote);
         });
 
         builder.Entity<RecordSource>(e =>
         {
             e.ToTable("record_sources");
             e.HasKey(x => new { x.FundingRecordId, x.SourceId });
-            e.Property(x => x.SupportingNote).HasMaxLength(1000);
+            e.Property(x => x.SupportingNote).HasMaxLength(FieldLimits.RecordSourceSupportingNote);
             e.HasOne(x => x.FundingRecord)
                 .WithMany(r => r.Sources)
                 .HasForeignKey(x => x.FundingRecordId)
@@ -81,8 +82,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
         {
             e.ToTable("glossary_terms");
             e.HasKey(x => x.Id);
-            e.Property(x => x.Term).HasMaxLength(200).IsRequired();
-            e.Property(x => x.Definition).HasMaxLength(4000).IsRequired();
+            e.Property(x => x.Term).HasMaxLength(FieldLimits.GlossaryTerm).IsRequired();
+            e.Property(x => x.Definition).HasMaxLength(FieldLimits.GlossaryDefinition).IsRequired();
             e.HasIndex(x => x.Term).IsUnique();
             e.HasOne(x => x.Source)
                 .WithMany()

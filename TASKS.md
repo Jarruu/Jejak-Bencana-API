@@ -5,7 +5,7 @@ Tahapan mengikuti `SPECS.md` §12 (A → G). Satu tahap selesai dan diuji sebelu
 
 Legenda: `[x]` selesai · `[~]` selesai sebagian · `[ ]` belum
 
-**Status ringkas:** tahap A–G untuk backend selesai, kecuali butir yang butuh PostgreSQL/hosting nyata (lihat "Sisa pekerjaan"). 59 test lulus.
+**Status ringkas:** tahap A–G untuk backend selesai, kecuali butir yang butuh PostgreSQL/hosting nyata (lihat "Sisa pekerjaan"). 64 test lulus.
 
 ---
 
@@ -56,8 +56,8 @@ Keputusan implementasi kecil lain (asumsi, silakan tinjau):
 - [x] Relasi: Case 1–N FundingRecord, FundingRecord N–N Source via RecordSource, GlossaryTerm N–0..1 Source
 - [x] `AppDbContext` (Identity + konfigurasi enum/kolom/index unik slug)
 - [x] Migrasi awal
-- [x] Seeder data contoh berlabel "DATA CONTOH — JANGAN DITERBITKAN", status `Draft`, `amount` 0
-- [x] Seeder admin dari environment variable, hanya di Development
+- [x] Seeder data contoh berlabel "DATA CONTOH — JANGAN DITERBITKAN", status `Draft`, `amount` 0 (hanya Development)
+- [x] Admin pertama dari environment variable bila tabel user kosong (semua environment)
 - [ ] Jalankan migrasi terhadap PostgreSQL nyata
 
 ## C. API publik
@@ -113,7 +113,7 @@ Di luar repo ini (pekerjaan `jejak-bencana-web`).
 |---|---|---|
 | 1 | Isi data kasus nyata | Tahap F: audit sumber dilakukan tim. Seeder hanya menghasilkan data contoh draft. |
 | 2 | Pilih hosting backend + database | Keputusan tim (SPECS §15 no.1). |
-| 3 | Akun admin production | Seeder hanya jalan di Development; akun production dibuat manual. |
+| 3 | Akun admin production | Dibuat otomatis dari `ADMIN_EMAIL`/`ADMIN_PASSWORD` saat startup pertama; hapus variabelnya setelah login berhasil. |
 | 4 | Bersihkan data uji | `scripts/e2e.sh` meninggalkan kasus/sumber uji di database. Hapus sebelum demo. |
 
 ---
@@ -128,7 +128,7 @@ Perintah yang dijalankan pada mesin ini:
 | `dotnet ef migrations add InitialCreate` | Migrasi dibuat di `Data/Migrations` |
 | `dotnet ef migrations script` | SQL PostgreSQL terbentuk |
 | `dotnet ef migrations has-pending-model-changes` | Tidak ada perubahan model yang belum dimigrasikan |
-| `dotnet test tests/JejakBencana.Api.Tests` | **59 test lulus**, 0 gagal |
+| `dotnet test tests/JejakBencana.Api.Tests` | **64 test lulus**, 0 gagal |
 | `dotnet run` tanpa `ConnectionStrings__Default` | Gagal cepat dengan pesan konfigurasi (sesuai harapan) |
 | `dotnet ef database update` | `InitialCreate` diterapkan ke PostgreSQL nyata |
 | `dotnet run` (Development, PostgreSQL nyata) | Seeder membuat akun admin + data contoh draft; `/api/cases` kosong (draft tidak bocor) |

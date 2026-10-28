@@ -12,8 +12,12 @@ public sealed class AppDbContextFactory : IDesignTimeDbContextFactory<AppDbConte
 {
     public AppDbContext CreateDbContext(string[] args)
     {
+        // Tanpa fallback: connection string yang salah ketik atau lupa dimuat harus gagal keras,
+        // bukan diam-diam memigrasi database lokal yang kebetulan cocok dengan kredensial default.
         var connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__Default")
-            ?? "Host=localhost;Database=jejak_bencana;Username=postgres;Password=postgres";
+            ?? throw new InvalidOperationException(
+                "ConnectionStrings__Default belum diatur. `dotnet ef` tidak memakai fallback agar " +
+                "migrasi tidak masuk ke database yang salah. Lihat README.md bagian Konfigurasi.");
 
         var options = new DbContextOptionsBuilder<AppDbContext>()
             .UseNpgsql(connectionString)

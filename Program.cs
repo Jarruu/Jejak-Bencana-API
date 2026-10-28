@@ -1,7 +1,10 @@
+using System.Threading.RateLimiting;
 using JejakBencana.Api.Data;
 using JejakBencana.Api.Domain;
 using JejakBencana.Api.Endpoints;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi;
 using Scalar.AspNetCore;
@@ -16,7 +19,9 @@ if (string.IsNullOrWhiteSpace(connectionString))
         "Lihat README.md bagian Konfigurasi.");
 }
 
-builder.Services.AddDbContext<AppDbContext>(options => options.UseNpgsql(connectionString));
+builder.Services.AddDbContext<AppDbContext>(options =>
+    // Database terkelola memutus koneksi idle; retry mencegah 500 sesaat saat reconnect.
+    options.UseNpgsql(connectionString, npgsql => npgsql.EnableRetryOnFailure()));
 
 builder.Services
     .AddIdentityCore<AdminUser>(options =>
@@ -68,6 +73,34 @@ builder.Services.ConfigureApplicationCookie(options =>
 });
 
 builder.Services.AddAuthorization();
+
+// TLS diterminasi reverse proxy (lihat cookie SecurePolicy). Tanpa ini RemoteIpAddress
+// selalu IP proxy, sehingga batas per IP di bawah berlaku untuk semua pengunjung sekaligus.
+// KnownIPNetworks/KnownProxies dikosongkan karena proxy berada di jaringan privat container.
+// shortcut: X-Forwarded-For dipercaya dari sumber mana pun, jadi rate limit bisa diakali
+// dengan memalsukan header. Isi KnownProxies dengan rentang proxy bila hosting sudah pasti.
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.KnownIPNetworks.Clear();
+    options.KnownProxies.Clear();
+});
+
+// Lockout akun saja tidak cukup: penyerang bisa mengunci satu-satunya admin dengan 5 request.
+// Batas per IP membuat percobaan berulang mahal tanpa mengunci akun.
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("login", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 10,
+                Window = TimeSpan.FromMinutes(1),
+            }));
+});
+
 builder.Services.AddProblemDetails();
 builder.Services.AddOpenApi("v1", options =>
 {
@@ -115,7 +148,28 @@ if (app.Environment.IsDevelopment())
 app.UseExceptionHandler();
 app.UseStatusCodePages();
 
-app.MapGet("/health", () => Results.Ok(new { status = "ok" })).WithTags("Sistem");
+// Harus sebelum UseRateLimiter agar IP asli sudah terbaca.
+app.UseForwardedHeaders();
+
+// Health check harus cepat: platform memanggilnya tiap beberapa detik dan memberi timeout
+// pendek. Retry koneksi Npgsql bisa memakan puluhan detik, jadi dibatasi 5 detik di sini.
+app.MapGet("/health", async (AppDbContext db) =>
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        try
+        {
+            return await db.Database.CanConnectAsync(timeout.Token)
+                ? Results.Ok(new { status = "ok" })
+                : Results.Json(new { status = "unhealthy" }, statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
+        catch (OperationCanceledException)
+        {
+            return Results.Json(new { status = "unhealthy" }, statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
+    })
+    .WithTags("Sistem");
+
+app.UseRateLimiter();
 
 app.UseAuthentication();
 app.UseAuthorization();
@@ -123,9 +177,17 @@ app.UseAuthorization();
 app.MapPublicEndpoints();
 app.MapAdminEndpoints();
 
-if (app.Environment.IsDevelopment())
+// Admin pertama harus bisa dibuat di semua environment: tidak ada endpoint daftar user,
+// jadi tanpa ini database production yang kosong tidak bisa dipakai sama sekali.
+// Kegagalan di sini tidak menggagalkan startup: /health melaporkan 503 sampai database
+// terjangkau, dan seeder dicoba lagi pada restart berikutnya.
+try
 {
     await SeedAsync(app);
+}
+catch (Exception ex)
+{
+    app.Logger.LogCritical(ex, "Seeder gagal saat startup. Periksa koneksi database; /health akan melaporkan 503.");
 }
 
 app.Run();
@@ -137,25 +199,46 @@ static async Task SeedAsync(WebApplication app)
     var logger = services.GetRequiredService<ILoggerFactory>().CreateLogger("Seeder");
 
     var db = services.GetRequiredService<AppDbContext>();
-    if ((await db.Database.GetPendingMigrationsAsync()).Any())
-        await db.Database.MigrateAsync();
+
+    // Migrasi otomatis hanya di Development. Di production migrasi dijalankan dari pipeline
+    // (README bagian deploy) agar beberapa instance tidak balapan memigrasi database yang sama.
+    if (db.Database.IsRelational())
+    {
+        var pending = await db.Database.GetPendingMigrationsAsync();
+        if (pending.Any())
+        {
+            if (app.Environment.IsDevelopment())
+                await db.Database.MigrateAsync();
+            else
+                logger.LogError("Ada migrasi yang belum diterapkan. Jalankan `dotnet ef database update` sebelum deploy.");
+        }
+    }
 
     var userManager = services.GetRequiredService<UserManager<AdminUser>>();
-    var email = Environment.GetEnvironmentVariable("ADMIN_EMAIL");
-    var password = Environment.GetEnvironmentVariable("ADMIN_PASSWORD");
+    var email = app.Configuration["ADMIN_EMAIL"];
+    var password = app.Configuration["ADMIN_PASSWORD"];
 
-    if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
+    // Hanya bila belum ada user sama sekali, supaya kredensial di environment tidak
+    // menimpa/menambah akun setelah admin asli dibuat.
+    if (!await userManager.Users.AnyAsync())
     {
-        logger.LogWarning("ADMIN_EMAIL/ADMIN_PASSWORD belum diatur; akun admin tidak dibuat.");
-    }
-    else if (await userManager.FindByEmailAsync(email) is null)
-    {
-        var result = await userManager.CreateAsync(new AdminUser { UserName = email, Email = email }, password);
-        if (result.Succeeded)
-            logger.LogInformation("Akun admin awal dibuat untuk {Email}.", email);
+        if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
+        {
+            logger.LogError("Belum ada akun admin dan ADMIN_EMAIL/ADMIN_PASSWORD kosong; panel admin tidak bisa dipakai.");
+        }
         else
-            logger.LogError("Gagal membuat akun admin: {Errors}", string.Join("; ", result.Errors.Select(e => e.Description)));
+        {
+            var result = await userManager.CreateAsync(new AdminUser { UserName = email, Email = email }, password);
+            if (result.Succeeded)
+                logger.LogInformation("Akun admin awal dibuat untuk {Email}.", email);
+            else
+                logger.LogError("Gagal membuat akun admin: {Errors}", string.Join("; ", result.Errors.Select(e => e.Description)));
+        }
     }
+
+    // Data contoh hanya untuk pengembangan.
+    if (!app.Environment.IsDevelopment())
+        return;
 
     if (await db.Cases.AnyAsync())
         return;
